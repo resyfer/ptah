@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use gumdrop::Options;
 
 #[derive(Debug, Options)]
@@ -27,11 +29,11 @@ pub struct BuildArgs {
     pub help: bool,
 
     #[options(help = "Build configuration file", default = "config.json")]
-    pub config_file: String,
+    pub config_file: PathBuf,
 }
 
 #[derive(Debug, Options, Default)]
 pub struct InitArgs {
     #[options(help = "project directory", default = ".")]
-    pub dir: String,
+    pub dir: PathBuf,
 }

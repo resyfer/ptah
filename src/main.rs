@@ -6,6 +6,7 @@ mod args;
 mod build;
 mod config;
 mod error;
+mod gcc;
 mod init;
 
 fn main() {
