@@ -12,7 +12,7 @@ pub struct Config {
     pub build: BuildConfig,
 
     pub version: Version,
-    pub executable: Vec<ExecConfig>,
+    pub executables: Vec<ExecConfig>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

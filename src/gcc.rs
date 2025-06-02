@@ -1,4 +1,6 @@
-use std::{ffi::OsStr, path::PathBuf};
+use std::{
+    fs, path::PathBuf, process::{Command, Output}
+};
 
 use crate::error::Error;
 
@@ -41,7 +43,23 @@ impl Compiler<'_> {
         }
     }
 
-    pub fn command(&self) -> Result<String, Error> {
+    pub fn get_input_str(&self) -> String {
+        self.input_files
+            .iter()
+            .filter_map(|f| f.to_str())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    pub fn get_include_str(&self) -> String {
+        self.include_files
+            .iter()
+            .map(|p| format!("-I{}", p.display()))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    pub fn run_command(&self) -> Result<Output, Error> {
         match self.command {
             CompilerCommand::COMPILE => {
                 if self.input_files.len() > 1 {
@@ -50,30 +68,42 @@ impl Compiler<'_> {
                     )));
                 }
 
-                let input_str = self
-                    .input_files
-                    .iter()
-                    .filter_map(|f| f.to_str())
-                    .collect::<Vec<_>>()
-                    .join(" ");
+                let input_str = self.get_input_str();
+                let include_str = self.get_include_str();
 
-                let include_str = self
-                    .include_files
-                    .iter()
-                    .filter_map(|f| f.to_str())
-                    .map(|s| format!("-I{}", s))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-
-                let output_str = match self.output_file.to_str() {
-                    None => return Err(Error::Custom(String::from("Output file is unparseable."))),
+                // Create output directories
+                let output_parent = match self.output_file.parent() {
+                    None => return Err(Error::Custom(String::from("Can't get parent."))),
                     Some(val) => val,
                 };
 
-                Ok(String::from(format!(
-                    "{} {} {} -o {}",
-                    self.compiler, include_str, input_str, output_str
-                )))
+                if !output_parent.exists() {
+                    match fs::create_dir_all(&self.output_file) {
+                        Err(e) => return Err(Error::Custom(e.to_string())),
+                        Ok(_) => {}
+                    }
+                }
+
+                let output_str = match self.output_file.to_str() {
+                    None => return Err(Error::Custom(String::from("Output file is unparseable."))),
+                    Some(val) => {
+                        let mut val = val.to_string();
+                        val.push_str(".o");
+                        val
+                    }
+                };
+
+                match Command::new(self.compiler.clone())
+                    .arg(include_str)
+                    .arg(input_str)
+                    .arg("-c")
+                    .arg("-o")
+                    .arg(output_str)
+                    .output()
+                {
+                    Err(e) => Err(Error::Custom(e.to_string())),
+                    Ok(val) => Ok(val),
+                }
             }
             CompilerCommand::LINK => {
                 todo!()
