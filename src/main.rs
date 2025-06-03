@@ -1,4 +1,5 @@
 use gumdrop::Options;
+use log::{debug, warn};
 
 use crate::{args::Args, build::build_project, init::init_project};
 
@@ -11,15 +12,22 @@ mod init;
 
 fn main() {
     let opts = Args::parse_args_default_or_exit();
-    println!("{:#?}", opts);
+    debug!("Argument Parsing {:#?}", opts);
 
     let Args {
         command,
         help: _,
-        version: _,
+        version,
     } = opts;
 
+    if version {
+        debug!("Printing version...");
+        println!("Version: {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+
     if let None = command {
+        warn!("No command specified.");
         println!("Please mention a command.");
     }
 
@@ -30,5 +38,5 @@ fn main() {
         args::Command::Init(init_args) => init_project(init_args),
     };
 
-    println!("{:#?}", res);
+    debug!("{:#?}", res);
 }

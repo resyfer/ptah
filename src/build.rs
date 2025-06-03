@@ -3,7 +3,7 @@ use std::{
     fs::{self, read_to_string},
     path::PathBuf,
     process::Command,
-    time::SystemTime,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use walkdir::WalkDir;
@@ -52,6 +52,11 @@ fn compile_executable(
 
     let build_dir = &build.dir;
 
+    let mut unchanged = true;
+    let mut object_files: HashSet<PathBuf> = HashSet::new();
+
+    // Indivial compilation
+
     for source in sources {
         let source = source.strip_prefix("./").unwrap_or(source.as_path());
 
@@ -63,40 +68,78 @@ fn compile_executable(
         let gcc = Compiler::builder(compiler, crate::gcc::CompilerCommand::COMPILE)
             .add_input(source.to_path_buf())?
             .add_includes(&mut includes_vec)
-            .set_output(output_path)
+            .set_output(&mut output_path)?
             .build()?;
 
         let deps = get_source_deps(compiler, gcc.get_include_str(), &source.to_path_buf())?;
+        object_files.insert(gcc.get_owned_output_file());
 
         let mut compile = false;
+
         let source_mod_ts = get_file_modification_ts(&source.to_path_buf())?;
+        let output_mod_ts = get_file_modification_ts(gcc.get_output_file())?;
 
-        for dep in deps {
-            let dep_mod_ts = get_file_modification_ts(&dep)?;
+        if output_mod_ts <= source_mod_ts {
+            compile = true;
+        }
 
-            // TODO: Change source_mod_ts to output_mod_ts
+        if !compile {
+            for dep in deps {
+                let dep_mod_ts = get_file_modification_ts(&dep)?;
 
-            if source_mod_ts > dep_mod_ts {
-                compile = true;
-                break;
+                if output_mod_ts <= dep_mod_ts {
+                    compile = true;
+                    break;
+                }
             }
         }
 
-        if compile {
-            let source_str = gcc.get_input_filename()?;
-            println!("\t[CC]: {}", source_str);
-
-            let output = gcc.run_command()?;
-
-            if !output.status.success() {
-                let stdout_str = match str::from_utf8(&output.stderr) {
-                    Err(e) => return Err(Error::Custom(e.to_string())),
-                    Ok(val) => val,
-                };
-
-                println!("{}", stdout_str);
-            }
+        if !compile {
+            continue;
         }
+
+        unchanged = false;
+
+        let source_str = gcc.get_input_filename()?;
+        println!("\t[CC]: {}", source_str);
+
+        let output = gcc.run_command()?;
+
+        if !output.status.success() {
+            let err_str = match std::str::from_utf8(&output.stderr) {
+                Err(e) => return Err(Error::Custom(e.to_string())),
+                Ok(val) => val,
+            };
+
+            println!("{}", err_str);
+        }
+    }
+
+    // Linking
+
+    if unchanged {
+        return Ok(());
+    }
+
+    println!("\t[LINK]: {}", executable.name);
+    let mut obj_files = object_files.iter().cloned().collect::<Vec<PathBuf>>();
+
+    let mut output_path = build_dir.clone();
+    output_path.push(PathBuf::from(&executable.name));
+
+    let output = Compiler::builder(compiler, crate::gcc::CompilerCommand::LINK)
+        .add_inputs(&mut obj_files)?
+        .set_output(&mut output_path)?
+        .build()?
+        .run_command()?;
+
+    if !output.status.success() {
+        let stdout_str = match std::str::from_utf8(&output.stderr) {
+            Err(e) => return Err(Error::Custom(e.to_string())),
+            Ok(val) => val,
+        };
+
+        println!("{}", stdout_str);
     }
 
     Ok(())
@@ -161,8 +204,6 @@ fn get_source_deps(
         Some(val) => val,
     };
 
-    // println!("\t[DEPS] {}", source);
-
     let deps_output = match Command::new(compiler)
         .arg(include_str)
         .arg(source)
@@ -210,12 +251,12 @@ fn get_header_deps(dep_str: String) -> Result<Vec<PathBuf>, Error> {
 
 fn get_file_modification_ts(path: &PathBuf) -> Result<SystemTime, Error> {
     let metadata = match fs::metadata(path) {
-        Err(e) => return Err(Error::Custom(e.to_string())),
+        Err(_) => return Ok(UNIX_EPOCH),
         Ok(val) => val,
     };
 
     match metadata.modified() {
-        Err(e) => Err(Error::Custom(e.to_string())),
+        Err(_) => return Ok(UNIX_EPOCH),
         Ok(val) => Ok(val),
     }
 }

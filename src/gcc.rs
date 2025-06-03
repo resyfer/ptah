@@ -1,5 +1,7 @@
 use std::{
-    fs, path::PathBuf, process::{Command, Output}
+    fs,
+    path::PathBuf,
+    process::{Command, Output},
 };
 
 use crate::error::Error;
@@ -59,6 +61,14 @@ impl Compiler<'_> {
             .join(" ")
     }
 
+    pub fn get_output_file(&self) -> &PathBuf {
+        &self.output_file
+    }
+
+    pub fn get_owned_output_file(&self) -> PathBuf {
+        self.output_file.clone()
+    }
+
     pub fn run_command(&self) -> Result<Output, Error> {
         match self.command {
             CompilerCommand::COMPILE => {
@@ -78,7 +88,7 @@ impl Compiler<'_> {
                 };
 
                 if !output_parent.exists() {
-                    match fs::create_dir_all(&self.output_file) {
+                    match fs::create_dir_all(output_parent) {
                         Err(e) => return Err(Error::Custom(e.to_string())),
                         Ok(_) => {}
                     }
@@ -86,11 +96,7 @@ impl Compiler<'_> {
 
                 let output_str = match self.output_file.to_str() {
                     None => return Err(Error::Custom(String::from("Output file is unparseable."))),
-                    Some(val) => {
-                        let mut val = val.to_string();
-                        val.push_str(".o");
-                        val
-                    }
+                    Some(val) => val.to_string(),
                 };
 
                 match Command::new(self.compiler.clone())
@@ -106,7 +112,35 @@ impl Compiler<'_> {
                 }
             }
             CompilerCommand::LINK => {
-                todo!()
+                let input_str = self.get_input_str();
+
+                // Create output directories
+                let output_parent = match self.output_file.parent() {
+                    None => return Err(Error::Custom(String::from("Can't get parent."))),
+                    Some(val) => val,
+                };
+
+                if !output_parent.exists() {
+                    match fs::create_dir_all(&self.output_file) {
+                        Err(e) => return Err(Error::Custom(e.to_string())),
+                        Ok(_) => {}
+                    }
+                }
+
+                let output_str = match self.output_file.to_str() {
+                    None => return Err(Error::Custom(String::from("Output file is unparseable."))),
+                    Some(val) => val.to_string(),
+                };
+
+                match Command::new(self.compiler.clone())
+                    .args(input_str.split_whitespace())
+                    .arg("-o")
+                    .arg(output_str)
+                    .output()
+                {
+                    Err(e) => Err(Error::Custom(e.to_string())),
+                    Ok(val) => Ok(val),
+                }
             }
         }
     }
@@ -120,15 +154,27 @@ pub struct CompilerBuilder<'a> {
     include_files: Vec<&'a PathBuf>,
 }
 
+#[derive(PartialEq)]
 pub enum CompilerCommand {
     COMPILE,
     LINK,
 }
 
 impl<'a> CompilerBuilder<'a> {
-    pub fn set_output(mut self, output: PathBuf) -> Self {
-        self.output_file = Some(output);
-        self
+    pub fn set_output(mut self, output: &mut PathBuf) -> Result<Self, Error> {
+        if let Some(filename) = output.file_name().and_then(|n| n.to_str()) {
+            if self.command == CompilerCommand::COMPILE {
+                let new_output_filename = format!("{}.o", filename);
+                output.set_file_name(new_output_filename);
+            }
+
+            self.output_file = Some(output.clone());
+            Ok(self)
+        } else {
+            Err(Error::Custom(String::from(
+                "Output does not have a valid filename.",
+            )))
+        }
     }
 
     pub fn add_input(mut self, input: PathBuf) -> Result<Self, Error> {
